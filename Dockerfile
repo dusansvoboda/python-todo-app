@@ -1,18 +1,15 @@
-# Use an official lightweight Python image
-FROM python:3.9-slim
+# Use a slightly older/different base image
+FROM python:3.8-slim
 
-# Set the working directory
 WORKDIR /app
 
-# Copy the requirements (we don't have one, but this is good practice)
-# COPY requirements.txt .
-# RUN pip install -r requirements.txt
+# Copy configuration file
+COPY .pydistutils.cfg /root/.pydistutils.cfg
 
-# Copy the application code
+# Copy files and install
+COPY requirements.txt .
+RUN pip install -r requirements.txt
+
 COPY app.py .
-
-# Expose the port the app runs on
 EXPOSE 5000
-
-# Command to run the application
 CMD ["python", "app.py"]
