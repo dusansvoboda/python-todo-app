@@ -1,34 +1,82 @@
-name: Build and Push Docker Image
+name: Build, Push, and Deploy
 
-# Trigger this workflow on every push to the 'main' branch
 on:
   push:
     branches: [ "main" ]
 
 jobs:
-  build-and-push:
+  build-push-image: # Renamed job for clarity
     runs-on: ubuntu-latest
-    
-    # Grant permissions for the GITHUB_TOKEN to write to GHCR
     permissions:
       contents: read
       packages: write
+    
+    outputs: # We need to output the SHA to use in the next job
+      commit_sha: ${{ github.sha }}
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
+      # NOTE: This step is now using your working secrets.GHCR_PAT
       - name: Log in to GitHub Container Registry
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{ github.repository_owner }}
-          password: ${{ secrets.GHCR_PAT }}
+          password: ${{ secrets.GHCR_PAT }} 
 
       - name: Build and push image
         uses: docker/build-push-action@v5
         with:
           context: .
           push: true
-          # We tag the image with the unique Git commit SHA
           tags: ghcr.io/${{ github.repository_owner }}/python-todo-app:${{ github.sha }}
+
+  # --- NEW JOB TO UPDATE MANIFESTS ---
+  update-manifest:
+    runs-on: ubuntu-latest
+    needs: build-push-image # This job runs only after the image is built
+
+    steps:
+      - name: Check out manifest repo
+        uses: actions/checkout@v4
+        with:
+          # Check out the manifest repo instead of the app repo
+          repository: ${{ github.repository_owner }}/k3s-lab-manifests
+          # Use the SSH deploy key for write access
+          ssh-key: ${{ secrets.DEPLOY_KEY_MANIFESTS }}
+          path: k3s-lab-manifests # Check it out into a sub-directory
+
+      - name: Install yq
+        run: |
+          # yq is used for robust YAML updates
+          wget https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64 -O /usr/bin/yq
+          chmod +x /usr/bin/yq          
+
+      - name: Update image tag
+        run: |
+          # The new image tag from the previous job
+          IMAGE_TAG="ghcr.io/${{ github.repository_owner }}/python-todo-app:${{ needs.build-push-image.outputs.commit_sha }}"
+          
+          # Update the deployment.yml file using yq
+          yq e -i '.spec.template.spec.containers[0].image = strenv(IMAGE_TAG)' k3s-lab-manifests/02-deployment.yml
+          
+          echo "Updated image to: $IMAGE_TAG"
+
+      - name: Commit and push changes
+        run: |
+          cd k3s-lab-manifests
+          # Configure Git identity for the commit
+          git config --global user.name "GitHub Action"
+          git config --global user.email "action@github.com"
+          
+          git add 02-deployment.yml          
+          
+          # Only commit if there are actual changes
+          if git diff-index --quiet HEAD; then
+            echo "No changes to commit."
+          else
+            git commit -m "Update image tag to ${{ needs.build-push-image.outputs.commit_sha }}"
+            git push # Push the manifest update
+          fi
