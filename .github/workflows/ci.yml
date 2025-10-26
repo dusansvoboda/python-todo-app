@@ -59,7 +59,7 @@ jobs:
       - name: Update image tag
         run: |
           # The new image tag from the previous job
-          IMAGE_TAG="ghcr.io/${{ github.repository_owner }}/python-todo-app:${{ needs.build-push-image.outputs.commit_sha }}"
+          export IMAGE_TAG="ghcr.io/${{ github.repository_owner }}/python-todo-app:${{ needs.build-push-image.outputs.commit_sha }}"
           
           # Update the deployment.yml file using yq
           ./yq e -i '.spec.template.spec.containers[0].image = strenv(IMAGE_TAG)' k3s-lab-manifests/02-deployment.yml
